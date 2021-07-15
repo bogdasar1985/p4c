@@ -15,20 +15,6 @@ struct BFRuntimeSchemaGenerator::ActionSelector {
     Util::JsonArray* annotations;
 
     static boost::optional<ActionSelector>
-    from(const p4configv1::P4Info& p4info, const p4configv1::ActionProfile& actionProfile) {
-        const auto& pre = actionProfile.preamble();
-        if (!actionProfile.with_selector())
-            return boost::none;
-        auto selectorId = makeBFRuntimeId(pre.id(), ::dpdk::P4Ids::ACTION_SELECTOR);
-        auto selectorGetMemId = makeBFRuntimeId(pre.id(), ::dpdk::P4Ids::ACTION_SELECTOR_GET_MEMBER);
-        auto tableIds = collectTableIds(
-            p4info, actionProfile.table_ids().begin(), actionProfile.table_ids().end());
-        return ActionSelector{pre.name(), pre.name() + "_get_member",
-                 selectorId, selectorGetMemId, actionProfile.max_group_size(),
-                 actionProfile.size(), tableIds, transformAnnotations(pre)};
-    }
-
-    static boost::optional<ActionSelector>
     fromDPDK(const p4configv1::P4Info& p4info, const p4configv1::ExternInstance& externInstance) {
         const auto& pre = externInstance.preamble();
         ::dpdk::ActionSelector actionSelector;
@@ -99,7 +85,8 @@ BFRuntimeSchemaGenerator::addActionSelectorGetMemberCommon(Util::JsonArray* tabl
 
         tableJson->emplace("supported_operations", new Util::JsonArray());
         tableJson->emplace("attributes", new Util::JsonArray());
-        addToDependsOn(tableJson, actionSelector.id);
+        // Add Action Profile Id to Depends On
+        // addToDependsOn(tableJson, actionSelector.actionProfId);
 
         tablesJson->append(tableJson);
 }
@@ -178,10 +165,6 @@ BFRuntimeSchemaGenerator::addActionProfs(Util::JsonArray* tablesJson) const {
         auto actionProfInstance = ActionProf::from(p4info, actionProf);
         if (actionProfInstance == boost::none) continue;
         addActionProfCommon(tablesJson, *actionProfInstance);
-
-        auto actionSelectorInstance = ActionSelector::from(p4info, actionProf);
-        if (actionSelectorInstance == boost::none) continue;
-        addActionSelectorCommon(tablesJson, *actionSelectorInstance);
     }
 }
 

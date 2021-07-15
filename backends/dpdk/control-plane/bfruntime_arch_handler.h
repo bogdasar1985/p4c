@@ -57,8 +57,6 @@ class SymbolTypeDPDK final : public SymbolType {
 /// serialized representation.
 struct ActionSelector {
     const cstring name;  // The fully qualified external name of this action selector.
-    const boost::optional<cstring> actionProfileName;  // If not known, we will generate
-                         // an action profile instance.
     const int64_t size;  // TODO(hanw): size does not make sense with new ActionSelector P4 extern
     const int64_t maxGroupSize;
     const int64_t numGroups;
@@ -117,119 +115,46 @@ class BFRuntimeArchHandlerPSA final : public P4RuntimeArchHandlerCommon<Arch::PS
         externInstance->mutable_info()->PackFrom(message);
     }
 
-    /// @return the action profile referenced in @table's implementation
-    /// property, if it has one, or boost::none otherwise.
-    boost::optional<ActionSelector>
-    getActionSelector(const IR::P4Table* table, ReferenceMap* refMap, TypeMap* typeMap) {
-        // using BFN::getExternInstanceFromPropertyByTypeName;
-         auto action_selector = getExternInstanceFromProperty(
-             table,
-             ActionProfileTraits<Arch::PSA>::propertyName(),
-             refMap,
-             typeMap);
-        // auto action_selector = getExternInstanceFromPropertyByTypeName(
-        //     table, "psa_implementation", "ActionSelector", refMap, typeMap);
-        if (!action_selector) return boost::none;
-        // TODO(hanw): remove legacy code
-        // used to support deprecated ActionSelector constructor.
-        if (action_selector->substitution.lookupByName("size")) {
-            auto size = action_selector->substitution.lookupByName("size")->expression;
-            BUG_CHECK(size->is<IR::Constant>(), "Non-constant size");
-            return ActionSelector{*action_selector->name,
-                                  boost::none,
-                                  size->to<IR::Constant>()->asInt(),
-                                  ActionSelector::defaultMaxGroupSize,
-                                  size->to<IR::Constant>()->asInt(),
-                                  getTableImplementationAnnotations(table, refMap)};
-        }
-        auto maxGroupSize =
-            action_selector->substitution.lookupByName("max_group_size")->expression;
-        auto numGroups =
-            action_selector->substitution.lookupByName("num_groups")->expression;
-        // size is a bit<32> compile-time value
-        BUG_CHECK(maxGroupSize->is<IR::Constant>(), "Non-constant max group size");
-        BUG_CHECK(numGroups->is<IR::Constant>(), "Non-constant num groups");
-        return ActionSelector{*action_selector->name,
-                              *action_selector->name,
-                              -1  /* size */,
-                              maxGroupSize->to<IR::Constant>()->asInt(),
-                              numGroups->to<IR::Constant>()->asInt(),
-                              getTableImplementationAnnotations(table, refMap)};
-    }
-
     boost::optional<ActionSelector>
     getActionSelector(const IR::ExternBlock* instance) {
         auto actionSelDecl = instance->node->to<IR::IDeclaration>();
         // to be deleted, used to support deprecated ActionSelector constructor.
-        if (instance->findParameterValue("size")) {
-            auto size = instance->getParameterValue("size");
-            BUG_CHECK(size->is<IR::Constant>(), "Non-constant size");
-            return ActionSelector{actionSelDecl->controlPlaneName(),
-                                  boost::none,
-                                  size->to<IR::Constant>()->asInt(),
-                                  ActionSelector::defaultMaxGroupSize,
-                                  size->to<IR::Constant>()->asInt(),
-                                  actionSelDecl->to<IR::IAnnotated>()};
-        }
-        auto maxGroupSize = instance->getParameterValue("max_group_size");
-        auto numGroups = instance->getParameterValue("num_groups");
-        BUG_CHECK(maxGroupSize->is<IR::Constant>(), "Non-constant max group size");
-        BUG_CHECK(numGroups->is<IR::Constant>(), "Non-constant num groups");
-        auto action_profile = instance->getParameterValue("action_profile");
-        auto action_profile_decl =
-            action_profile->to<IR::ExternBlock>()->node->to<IR::IDeclaration>();
+        auto size = instance->getParameterValue("size");
+        BUG_CHECK(size->is<IR::Constant>(), "Non-constant size");
         return ActionSelector{actionSelDecl->controlPlaneName(),
-            cstring::to_cstring(action_profile_decl->controlPlaneName()),
-            -1  /* size */,
-            maxGroupSize->to<IR::Constant>()->asInt(),
-            numGroups->to<IR::Constant>()->asInt(),
-            actionSelDecl->to<IR::IAnnotated>()};
+                              // boost::none,
+                              size->to<IR::Constant>()->asInt(),
+                              ActionSelector::defaultMaxGroupSize,
+                              size->to<IR::Constant>()->asInt(),
+                              actionSelDecl->to<IR::IAnnotated>()};
     }
 
-   void addActionSelector(const P4RuntimeSymbolTableIface& symbols,
-                         p4configv1::P4Info* p4Info,
-                         const ActionSelector& actionSelector) {
-       ::dpdk::ActionSelector selector;
-       selector.set_max_group_size(actionSelector.maxGroupSize);
-       selector.set_num_groups(actionSelector.numGroups);
-       if (actionSelector.actionProfileName) {
-           selector.set_action_profile_id(symbols.getId(
-               SymbolType::ACTION_PROFILE(),
-               *actionSelector.actionProfileName));
-           auto tablesIt = actionProfilesRefs.find(actionSelector.name);
-           if (tablesIt != actionProfilesRefs.end()) {
-               for (const auto& table : tablesIt->second) {
-                   selector.add_table_ids(symbols.getId(P4RuntimeSymbolType::TABLE(), table));
-               }
-           }
-           addP4InfoExternInstance(symbols, SymbolTypeDPDK::ACTION_SELECTOR(), "ActionSelector",
-                   actionSelector.name, actionSelector.annotations,
-                   selector, p4Info);
-       } else {
-           p4configv1::ActionProfile profile;
-           profile.set_size(actionSelector.size);
-           auto tablesIt = actionProfilesRefs.find(actionSelector.name);
-           if (tablesIt != actionProfilesRefs.end()) {
-               for (const auto& table : tablesIt->second) {
-                   profile.add_table_ids(symbols.getId(P4RuntimeSymbolType::TABLE(), table));
-                   selector.add_table_ids(symbols.getId(P4RuntimeSymbolType::TABLE(), table));
-               }
-           }
+    void addActionSelector(const P4RuntimeSymbolTableIface& symbols,
+                          p4configv1::P4Info* p4Info,
+                          const ActionSelector& actionSelector) {
+        ::dpdk::ActionSelector selector;
+        selector.set_max_group_size(actionSelector.maxGroupSize);
+        selector.set_num_groups(actionSelector.numGroups);
+        p4configv1::ActionProfile profile;
+        profile.set_size(actionSelector.size);
+        auto tablesIt = actionProfilesRefs.find(actionSelector.name);
+        if (tablesIt != actionProfilesRefs.end()) {
+            for (const auto& table : tablesIt->second) {
+                profile.add_table_ids(symbols.getId(P4RuntimeSymbolType::TABLE(), table));
+                selector.add_table_ids(symbols.getId(P4RuntimeSymbolType::TABLE(), table));
+            }
+            // We use the ActionSelector name for the action profile, and add a "_sel" suffix for
+            // the action selector.
+            cstring profileName = actionSelector.name;
+            selector.set_action_profile_id(symbols.getId(
+                        SymbolType::ACTION_PROFILE(), profileName));
+            cstring selectorName = profileName + "_sel";
+            addP4InfoExternInstance(symbols, SymbolTypeDPDK::ACTION_SELECTOR(), "ActionSelector",
+                    selectorName, actionSelector.annotations,
+                    selector, p4Info);
+        }
+    }
 
-           // We use the ActionSelector name for the action profile, and add a "_sel" suffix for
-           // the action selector.
-           cstring profileName = actionSelector.name;
-           // addP4InfoExternInstance(symbols, SymbolType::ACTION_PROFILE(), "ActionProfile",
-           //         profileName, actionSelector.annotations, profile,
-           //         p4Info);
-           selector.set_action_profile_id(symbols.getId(
-                       SymbolType::ACTION_PROFILE(), profileName));
-           cstring selectorName = profileName + "_sel";
-           addP4InfoExternInstance(symbols, SymbolTypeDPDK::ACTION_SELECTOR(), "ActionSelector",
-                   selectorName, actionSelector.annotations,
-                   selector, p4Info);
-       }
-   }
     void collectExternInstance(P4RuntimeSymbolTableIface* symbols,
                                const IR::ExternBlock* externBlock) {
         P4RuntimeArchHandlerCommon<Arch::PSA>::collectExternInstance(symbols, externBlock);
@@ -258,14 +183,6 @@ class BFRuntimeArchHandlerPSA final : public P4RuntimeArchHandlerCommon<Arch::PS
         } else {
             table->set_idle_timeout_behavior(p4configv1::Table::NO_TIMEOUT);
         }
-        // auto actionSelector = getActionSelector(tableDeclaration, refMap, typeMap);
-        // if (actionSelector) {
-        //     auto id = actionSelector->getId(symbols);
-        //     table->set_implementation_id(id);
-        //     if (isExternPropertyConstructedInPlace(tableDeclaration, "psa_implementation")) {
-        //         addActionSelector(symbols, p4info, *actionSelector);
-        //     }
-        // }
     }
 
     void addExternInstance(const P4RuntimeSymbolTableIface& symbols,

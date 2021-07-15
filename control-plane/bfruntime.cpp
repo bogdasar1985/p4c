@@ -532,7 +532,6 @@ BFRuntimeGenerator::addActionProfCommon(Util::JsonArray* tablesJson,
 
     tableJson->emplace("supported_operations", new Util::JsonArray());
     tableJson->emplace("attributes", new Util::JsonArray());
-    addToDependsOn(tableJson, actionProf.id);
 
     tablesJson->append(tableJson);
 }
